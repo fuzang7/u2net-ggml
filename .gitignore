@@ -18,3 +18,5 @@ Makefile
 *~
 .DS_Store
 output.png
+models/*.pth
+models/*.gguf
