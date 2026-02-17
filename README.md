@@ -2,10 +2,10 @@
 
 U-2-Net inference implementation using GGML.
 
-## 
 | Input Image | Output Image |
 | :---: | :---: |
-| ![Input](./path/to/input.jpg) | ![Output](./path/to/output.jpg) |
+| ![Input](./test_images/human.jpg) | ![Output](./test_images/output.png) |
+
 ## Build
 
 ```bash
