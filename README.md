@@ -4,7 +4,7 @@ U-2-Net inference implementation using GGML.
 
 | Input Image | Output Image |
 | :---: | :---: |
-| ![Input](./test_images/human.jpg) | ![Output](./test_images/output.png) |
+| <img src="./test_images/human.jpg" width="300"> | <img src="./test_images/output.png" width="300"> |
 
 ## Build
 
