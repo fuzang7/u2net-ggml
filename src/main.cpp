@@ -5,6 +5,16 @@
 
 #include "u2net.h"
 #include "u2net_layers.h"
+#include "ggml-cpu.h"
+#include <thread>
+#include <cstring>
+
+static void print_usage(const char* prog) {
+    printf("Usage: %s [options] <model.gguf> <input.jpg> [output.png]\n", prog);
+    printf("Options:\n");
+    printf("  -t N    Number of threads (default: %d)\n", std::thread::hardware_concurrency());
+    printf("  -h      Show this help\n");
+}
 
 void preprocess(const char* filename, struct ggml_tensor* input) {
     int w, h, c;
@@ -60,22 +70,41 @@ void postprocess(const char* out_name, struct ggml_tensor* output) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        printf("Usage: %s <model.gguf> <input.jpg> [output.png]\n", argv[0]);
+    int n_threads = std::thread::hardware_concurrency();
+    
+    int arg_idx = 1;
+    while (arg_idx < argc && argv[arg_idx][0] == '-') {
+        if (strcmp(argv[arg_idx], "-t") == 0 && arg_idx + 1 < argc) {
+            n_threads = atoi(argv[++arg_idx]);
+            if (n_threads < 1) n_threads = 1;
+        } else if (strcmp(argv[arg_idx], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[arg_idx]);
+            print_usage(argv[0]);
+            return 1;
+        }
+        arg_idx++;
+    }
+
+    if (argc - arg_idx < 2) {
+        print_usage(argv[0]);
         return 1;
     }
 
-    const char* model_path = argv[1];
-    const char* img_path = argv[2];
-    const char* out_path = (argc > 3) ? argv[3] : "output.png";
+    const char* model_path = argv[arg_idx];
+    const char* img_path = argv[arg_idx + 1];
+    const char* out_path = (argc - arg_idx > 2) ? argv[arg_idx + 2] : "output.png";
+
+    printf("Threads: %d\n", n_threads);
 
     u2net_model model;
     if (!u2net_model_load(model_path, model)) return 1;
 
+    size_t mem_size = 5120ULL * 1024 * 1024;
     struct ggml_init_params params = {
-        /*.mem_size   = */ 5120ULL * 1024 * 1024,
-        /*.mem_buffer = */ NULL,
-        /*.no_alloc   = */ false,
+        mem_size, NULL, false,
     };
     struct ggml_context* ctx = ggml_init(params);
 
@@ -88,8 +117,18 @@ int main(int argc, char** argv) {
     struct ggml_cgraph* gf = ggml_new_graph(ctx);
     ggml_build_forward_expand(gf, results.d0);
     
-    printf("Performing inference...\n");
-    ggml_graph_compute_with_ctx(ctx, gf, 1);
+    struct ggml_cplan cplan = ggml_graph_plan(gf, n_threads, nullptr);
+    if (cplan.work_size > 0) {
+        cplan.work_data = (uint8_t*)malloc(cplan.work_size);
+        printf("Work buffer: %.2f MB\n", cplan.work_size / 1024.0 / 1024.0);
+    }
+    
+    printf("Performing inference with %d thread(s)...\n", n_threads);
+    ggml_graph_compute(gf, &cplan);
+    
+    if (cplan.work_data) {
+        free(cplan.work_data);
+    }
 
     postprocess(out_path, results.d0);
     printf("Done! Mask saved to %s\n", out_path);

@@ -17,12 +17,17 @@ make
 ## Usage
 
 ```bash
-./u2net-cli <model.gguf> <input.jpg> [output.png]
+./u2net-cli [options] <model.gguf> <input.jpg> [output.png]
 ```
 
+**Arguments:**
 - `model.gguf`: U-2-Net model in GGUF format
 - `input.jpg`: Input image
 - `output.png`: Output mask (default: output.png)
+
+**Options:**
+- `-t N`: Number of threads (default: CPU cores)
+- `-h`: Show help
 
 ## Model Conversion
 
