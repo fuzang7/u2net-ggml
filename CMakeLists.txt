@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(GGML_NATIVE ON)
 set(GGML_BUILD_TESTS OFF)
 
+option(U2NET_CUDA "Enable CUDA GPU support" OFF)
+if(U2NET_CUDA)
+    set(GGML_CUDA ON CACHE BOOL "Enable CUDA" FORCE)
+endif()
+
 add_subdirectory(ggml)
 
 add_library(u2net-core STATIC

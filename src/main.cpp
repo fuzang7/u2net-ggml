@@ -5,18 +5,26 @@
 
 #include "u2net.h"
 #include "u2net_layers.h"
+#include "ggml-backend.h"
 #include "ggml-cpu.h"
 #include <thread>
 #include <cstring>
+#include <chrono>
+#include <vector>
+
+#ifdef GGML_USE_CUDA
+#include "ggml-cuda.h"
+#endif
 
 static void print_usage(const char* prog) {
     printf("Usage: %s [options] <model.gguf> <input.jpg> [output.png]\n", prog);
     printf("Options:\n");
-    printf("  -t N    Number of threads (default: %d)\n", std::thread::hardware_concurrency());
+    printf("  -t N    Number of CPU threads (default: %d)\n", std::thread::hardware_concurrency());
+    printf("  -d D    Device: cpu, cuda, auto (default: auto)\n");
     printf("  -h      Show this help\n");
 }
 
-void preprocess(const char* filename, struct ggml_tensor* input) {
+void preprocess(const char* filename, float* tensor_data) {
     int w, h, c;
     unsigned char* data = stbi_load(filename, &w, &h, &c, 3);
     if (!data) {
@@ -24,7 +32,6 @@ void preprocess(const char* filename, struct ggml_tensor* input) {
         exit(1);
     }
 
-    float* tensor_data = (float*)input->data;
     const int target_w = 320;
     const int target_h = 320;
 
@@ -38,8 +45,8 @@ void preprocess(const char* filename, struct ggml_tensor* input) {
         offset[i] = mean[i] / std[i];
     }
 
-    for (int c = 0; c < 3; ++c) {
-        float* channel_ptr = tensor_data + c * (target_w * target_h);
+    for (int ch = 0; ch < 3; ++ch) {
+        float* channel_ptr = tensor_data + ch * (target_w * target_h);
         
         for (int y = 0; y < target_h; ++y) {
             int src_y = y * h / target_h;
@@ -49,8 +56,8 @@ void preprocess(const char* filename, struct ggml_tensor* input) {
                 int src_x = x * w / target_w;
                 int src_idx = (src_y * w + src_x) * 3;
 
-                float val = (float)data[src_idx + c];
-                row_ptr[x] = val * scale[c] - offset[c];
+                float val = (float)data[src_idx + ch];
+                row_ptr[x] = val * scale[ch] - offset[ch];
             }
         }
     }
@@ -59,9 +66,8 @@ void preprocess(const char* filename, struct ggml_tensor* input) {
     printf("Preprocess completed: Image normalized and injected into WHCN tensor.\n");
 }
 
-void postprocess(const char* out_name, struct ggml_tensor* output) {
+void postprocess(const char* out_name, float* data) {
     std::vector<unsigned char> out_data(320 * 320);
-    float* data = (float*)output->data;
 
     for (int i = 0; i < 320 * 320; ++i) {
         out_data[i] = (unsigned char)(data[i] * 255.0f);
@@ -71,12 +77,15 @@ void postprocess(const char* out_name, struct ggml_tensor* output) {
 
 int main(int argc, char** argv) {
     int n_threads = std::thread::hardware_concurrency();
+    const char* device = "auto";
     
     int arg_idx = 1;
     while (arg_idx < argc && argv[arg_idx][0] == '-') {
         if (strcmp(argv[arg_idx], "-t") == 0 && arg_idx + 1 < argc) {
             n_threads = atoi(argv[++arg_idx]);
             if (n_threads < 1) n_threads = 1;
+        } else if (strcmp(argv[arg_idx], "-d") == 0 && arg_idx + 1 < argc) {
+            device = argv[++arg_idx];
         } else if (strcmp(argv[arg_idx], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -97,10 +106,37 @@ int main(int argc, char** argv) {
     const char* img_path = argv[arg_idx + 1];
     const char* out_path = (argc - arg_idx > 2) ? argv[arg_idx + 2] : "output.png";
 
-    printf("Threads: %d\n", n_threads);
-
     u2net_model model;
     if (!u2net_model_load(model_path, model)) return 1;
+
+    ggml_backend_t backend = nullptr;
+    bool use_cuda = false;
+
+    if (strcmp(device, "cuda") == 0 || strcmp(device, "auto") == 0) {
+#ifdef GGML_USE_CUDA
+        int n_gpu = ggml_backend_cuda_get_device_count();
+        if (n_gpu > 0) {
+            backend = ggml_backend_cuda_init(0);
+            if (backend) {
+                printf("Using CUDA GPU: device 0\n");
+                use_cuda = true;
+            }
+        }
+        if (!backend && strcmp(device, "cuda") == 0) {
+            fprintf(stderr, "CUDA requested but not available, falling back to CPU\n");
+        }
+#endif
+    }
+
+    if (!backend) {
+        backend = ggml_backend_cpu_init();
+        if (!backend) {
+            fprintf(stderr, "Failed to init CPU backend\n");
+            return 1;
+        }
+        printf("Using CPU backend with %d thread(s)\n", n_threads);
+        ggml_backend_cpu_set_n_threads(backend, n_threads);
+    }
 
     size_t mem_size = 5120ULL * 1024 * 1024;
     struct ggml_init_params params = {
@@ -109,7 +145,7 @@ int main(int argc, char** argv) {
     struct ggml_context* ctx = ggml_init(params);
 
     struct ggml_tensor* input = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 320, 320, 3, 1);
-    preprocess(img_path, input);
+    preprocess(img_path, (float*)input->data);
 
     printf("Building U-2-Net full graph...\n");
     u2net_out results = u2net_build_graph(ctx, model, input);
@@ -123,14 +159,18 @@ int main(int argc, char** argv) {
         printf("Work buffer: %.2f MB\n", cplan.work_size / 1024.0 / 1024.0);
     }
     
-    printf("Performing inference with %d thread(s)...\n", n_threads);
+    printf("Performing inference...\n");
+    auto start = std::chrono::high_resolution_clock::now();
     ggml_graph_compute(gf, &cplan);
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(end - start).count();
+    printf("Inference time: %.3f seconds\n", elapsed);
     
     if (cplan.work_data) {
         free(cplan.work_data);
     }
 
-    postprocess(out_path, results.d0);
+    postprocess(out_path, (float*)results.d0->data);
     printf("Done! Mask saved to %s\n", out_path);
 
     ggml_free(ctx);
