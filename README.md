@@ -4,7 +4,7 @@ U-2-Net inference implementation using GGML.
 
 | Input Image | Output Image |
 | :---: | :---: |
-| <img src="./test_images/human.jpg" width="300"> | <img src="./test_images/output.png" width="300"> |
+| <img src="./test_images/human.jpg" width="300"> | <img src="./test_images/output_mt_fullres.png" width="300"> |
 
 ## Features
 
@@ -15,7 +15,13 @@ U-2-Net inference implementation using GGML.
 
 ## Build
 
-### CPU Only
+### 1. Clone GGML
+
+```bash
+git clone --depth 1 https://github.com/ggerganov/ggml.git
+```
+
+### 2. Build
 
 ```bash
 mkdir build && cd build
@@ -25,7 +31,7 @@ make
 
 ### With CUDA GPU Support
 
-Requires CUDA Toolkit 12.x installed.
+Requires CUDA Toolkit 12.x installed. Clone GGML first, then:
 
 ```bash
 mkdir build && cd build
@@ -69,5 +75,5 @@ python convert.py
 
 - CMake 3.14+
 - C++17 compiler
-- GGML (included as submodule)
+- GGML (see Build step 1)
 - CUDA Toolkit 12.x (optional, for GPU support)
