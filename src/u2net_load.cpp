@@ -3,11 +3,12 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
+#include <cstring>
 
 void u2net_fuse_bn(u2net_model & model) {
     printf("Starting BN fusion...\n");
     int fused_count = 0;
-
+    
     for (auto const& [name, t_conv_w] : model.tensors) {
         size_t pos = name.find(".conv_s1.weight");
         if (pos == std::string::npos) continue;
@@ -21,6 +22,7 @@ void u2net_fuse_bn(u2net_model & model) {
         struct ggml_tensor * bn_v   = model.tensors[prefix + ".bn_s1.running_var"];
 
         if (!conv_b || !bn_w || !bn_b || !bn_m || !bn_v) continue;
+        if (!t_conv_w->data || !conv_b->data || !bn_w->data || !bn_b->data || !bn_m->data || !bn_v->data) continue;
 
         const float eps = 1e-5f;
         int64_t oc = t_conv_w->ne[3];
@@ -45,6 +47,7 @@ void u2net_fuse_bn(u2net_model & model) {
 
             b_data[i] = (b_data[i] - mean[i]) * scale + beta[i];
         }
+        
         fused_count++;
     }
     printf("Successfully fused %d BN layers into Conv layers.\n", fused_count);

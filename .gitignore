@@ -19,3 +19,5 @@ Makefile
 .DS_Store
 models/*.pth
 models/*.gguf
+*.idx
+ggml/

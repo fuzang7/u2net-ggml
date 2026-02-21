@@ -6,6 +6,16 @@
 #include <string>
 #include <vector>
 
+struct letterbox_info {
+    int orig_w = 0;
+    int orig_h = 0;
+    int padded_w = 0;
+    int padded_h = 0;
+    float scale = 1.0f;
+    int pad_top = 0;
+    int pad_left = 0;
+};
+
 struct u2net_model {
     struct gguf_context * ctx_gguf;
     struct ggml_context * ctx_data;
@@ -15,6 +25,8 @@ struct u2net_model {
     int hparams_c = 3;
     int hparams_h = 320;
     int hparams_w = 320;
+    int input_w = 320;
+    int input_h = 320;
 };
 
 bool u2net_model_load(const char * fname, u2net_model & model);
